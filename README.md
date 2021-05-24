@@ -1,0 +1,1 @@
+A Mini-Java compiler (a subset of normal Java), based on "Modern Compiler Implementation in Java" by Andrew Appeal and Jens Palsberg. Created for a Compiler Theory class. Currently unfinished, working up to generating intermediate representation (IR) trees. The nest step would be to convert the IR trees into assembly code.

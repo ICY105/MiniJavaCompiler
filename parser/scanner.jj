@@ -1,0 +1,603 @@
+PARSER_BEGIN(MiniJava)
+package parser;
+
+import java.util.List;
+import java.util.ArrayList;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import main.Scan;
+import syntax.*;
+
+/** Simple brace matcher. */
+public class MiniJava {
+
+	private static int errors = 0;
+	private static File file;
+
+	public static Program parseFile(File f) {
+	  	file = f;
+	  	try {
+			FileReader reader = new FileReader(file);
+			
+			MiniJava parser = new MiniJava(reader);
+			if (Scan.isVerbose())
+				parser.enable_tracing();
+			else
+				parser.disable_tracing();
+			Program p = parser.Input();
+			return p;
+		} catch(ParseException e) {
+			Scan.logError("An unrecoverable error occured in parsing.");
+		} catch (FileNotFoundException e) { }
+		return null;
+	}
+
+	public static void addError() {
+		errors += 1;
+	}
+
+	public static int errorCount() {
+		return errors;
+	}
+	
+}
+
+PARSER_END(MiniJava)
+
+<*> SKIP : {
+     < "//" (~["\n","\r"])* ("\r\n" | "\n" | "\r") >
+   | < "--" (~["\n","\r"])* ("\r\n" | "\n" | "\r") >
+   | "\t"
+   | "\n"
+   | "\r"
+   | " "
+}
+
+TOKEN : {
+  	 < GT:      ">" >
+   | < LT:      "<" >
+   | < OP: 		"(" >
+   | < CP: 		")" >
+   | < OB: 		"{" >
+   | < CB: 		"}" >
+   | < OS:		"[" >
+   | < CS:		"]" >
+   | < CM: 		"," >
+   | < EQL: 	"=" >
+   | < NOT:		"!" >
+   | < PER:		"." >
+   | < AND:		"&&" >
+   | < ADD:		"+" >
+   | < SUB:		"-" >
+   | < MUT:		"*" >
+   | < INT: 	"int" >
+   | < INTA: 	"int[]" >
+   | < BOOLEAN:	"boolean" >
+   | < IF: 		"if" >
+   | < ELSE:    "else" >
+   | < WHILE:   "while" >
+   | < CLASS:	"class" >
+   | < PUBLIC:	"public" >
+   | < STATIC:	"static" >
+   | < VOID:	"void" >
+   | < EXTENDS:	"extends" >
+   | < RETURN:	"return" >
+   | < THIS:	"this" >
+   | < TRUE:	"true" >
+   | < FALSE:	"false" >
+   | < NEW:		"new" >
+   | < SEMICOLON:	";" >
+   | < UNDERSCORE:	"_" >
+   | < LENGTH:		"length" >
+   | < __main__:	"main" >
+   | < __stringa__:	"String[]" >
+   | < INTLITERAL: (["0"-"9"])+ >
+   | < IDENTIFIER: (["A"-"Z"] | ["a"-"z"])(["A"-"Z"] | ["a"-"z"] | ["0"-"9"] | "_")* >
+   | < INVALID: ~[" ", "\t", "\n", "\b", "\f", "\r"] >
+
+}
+
+/** Root production. */
+Program Input() : { MainClass m; ClassDecl c; List<ClassDecl> cl = new ArrayList<ClassDecl>(); }
+{
+	try { 
+		m=MainClass() (c=ClassDeclaration() { cl.add(c); })*<EOF>
+		{ return new Program(m,cl); }
+	} catch(ParseException e) {
+		error(e);
+	}
+	{ return null; }
+}
+
+MainClass MainClass() : { Identifier c; MainClass m; }
+{
+	try {
+		"class" c=Identifier() "{" m=MainFunction(c) "}"
+		 { return m; }
+	} catch(ParseException e) {
+		String next = error(e);
+		switch(next) {
+			case "<INVALID>":
+				break;
+			case "}":
+				break;
+			case "class":
+				skip_to(OB,-1);
+				skip_to(CB,OB);
+				break;
+			case "<IDENTIFIER>":
+				skip_to(OB,-1);
+				skip_to(CB,OB);
+				break;
+			default:
+				skip_to(CB,OB);
+				break;
+		}
+	}
+	{ return null; }
+}
+
+MainClass MainFunction(Identifier c) : { Identifier f; Statement s; }
+{
+  	try {
+		"public" "static" "void" "main" "(" "String[]" f=Identifier() ")" "{" s=Statement() "}"
+		{ return new MainClass(c,f,s); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(next.equals("<INVALID>") || next.equals("public") || next.equals("static") || next.equals("void")
+			 || next.equals("main") || next.equals("(") || next.equals("String[]") || next.equals("<IDENTIFIER>")
+			 || next.equals(")")
+		) { 
+			skip_to(OB,-1);
+			skip_to(CB,OB);
+		} else if(next.equals("}")) {
+
+		} else {
+			skip_to(CB,OB);
+		}
+	}
+	{ return null; }
+}
+
+ClassDecl ClassDeclaration() : {
+	Identifier ci,ei=null; FieldDecl fd; MethodDecl md;
+	List<FieldDecl> fl = new ArrayList<FieldDecl>();
+	List<MethodDecl> ml = new ArrayList<MethodDecl>();
+}
+{
+	try {
+		"class" ci=Identifier() ( "extends" ei=Identifier() )? "{" ( fd=VarDeclarationField() { fl.add(fd); } )* ( md=MethodDeclaration() { ml.add(md); } )* "}"
+		{
+			if(ei == null)
+				return new SimpleClassDecl(ci,fl,ml);
+			else
+				return new ExtendingClassDecl(ci,ei,fl,ml);
+		}
+	} catch(ParseException e) {
+		String next = error(e);
+		switch(next) {
+			case "<INVALID>":
+				break;
+			case "}":
+				break;
+			case "class":
+				skip_to(OB,-1);
+				skip_to(CB,OB);
+				break;
+			case "<IDENTIFIER>":
+				skip_to(OB,-1);
+				skip_to(CB,OB);
+				break;
+			default:
+				skip_to(CB,OB);
+				break;
+		}
+	}
+	{ return null; }
+}
+
+MethodDecl MethodDeclaration() : {
+	Type nt,tt;
+    Identifier mi,ti;
+    List <FormalDecl> fl = new ArrayList<FormalDecl>();
+    List <LocalDecl> ll = new ArrayList<LocalDecl>();
+    LocalDecl tld;
+    List <Statement> sl = new ArrayList<Statement>();
+    Statement ts;
+    Expression ex;
+}
+{
+  	try {
+		"public" nt=Type() mi=Identifier()
+			"(" ( tt=Type() ti=Identifier() { fl.add(new FormalDecl(tt,ti)); } ( "," tt=Type() ti=Identifier() { fl.add(new FormalDecl(tt,ti)); } )* )? ")"
+			"{" ( LOOKAHEAD(2) tld=VarDeclarationLocal() { ll.add(tld); } )* ( ts=Statement() { sl.add(ts); } )* "return" ex=Expression() ";" "}"
+		{ return new MethodDecl(nt,mi,fl,ll,sl,ex); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(next.equals("<INVALID>") || next.equals("public") || next.equals("static") || next.equals("<TYPE>")
+			 || next.equals("main") || next.equals("(") || next.equals("String[]") || next.equals("<IDENTIFIER>")
+			 || next.equals(")")
+		) { 
+			skip_to(OB,-1);
+			skip_to(CB,OB);
+		} else if(next.equals("}")) {
+
+		} else {
+			skip_to(CB,OB);
+		}
+	}
+	{ return null; }
+}
+
+Statement Statement() : { Statement s; Identifier i; }
+{
+	try {
+		  "{" s=BlockStatement() 					{ return s; }
+		| "if" s=IfStatement() 						{ return s; }
+		| "while" s=WhileStatement() 				{ return s; }
+		| "System.out.println" s=PrintStatement() 	{ return s; }
+		| i=Identifier() s=AssignStatement(i) 		{ return s; }
+	} catch(ParseException e) {
+		String next = error(e);
+	}
+	{ return null; }
+}
+
+Statement BlockStatement() : { Statement s; List<Statement> sl = new ArrayList<Statement>(); }
+{
+  	try {
+		(s=Statement() { sl.add(s); } )* "}" { return new Block(sl); }
+	} catch(ParseException e) {
+		String next = error(e);
+		switch(next) {
+			case "}":
+				break;
+			default:
+				skip_to(CP,-1);
+				break;
+		}
+	}
+	{ return null; }
+}
+
+Statement IfStatement() : { Expression ex; Statement s1,s2; }
+{
+  	try {
+		"(" ex=Expression() ")" s1=Statement() "else" s2=Statement() { return new If(token.beginLine,token.beginColumn,ex,s1,s2); }
+	} catch(ParseException e) { 
+		String next = error(e);
+		if(!next.equals("else"))
+			skip_to(ELSE,-1);
+	}
+	{ return null; }
+}
+
+Statement WhileStatement() : { Expression ex; Statement s; }
+{
+  	try {
+		"(" ex=Expression() ")" s=Statement() { return new While(token.beginLine,token.beginColumn,ex,s); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(!next.equals(")"))
+			skip_to(ELSE,-1);
+	}
+	{ return null; }
+}
+
+Statement PrintStatement() : { Expression ex; }
+{
+  	try {
+		"(" ex=Expression() ")" ";" { return new Print(token.beginLine,token.beginColumn,ex); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(!next.equals(";"))
+			skip_to(SEMICOLON,-1);
+	}
+	{ return null; }
+}
+
+Statement AssignStatement(Identifier i) : { Expression ex1,ex2; }
+{
+  	try {
+		  "=" ex1=Expression() ";" { return new Assign(token.beginLine,token.beginColumn,i,ex1); }
+		| "[" ex1=Expression() "]" "=" ex2=Expression() ";" { return new ArrayAssign(token.beginLine,token.beginColumn,i,ex1,ex2); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(!next.equals(";"))
+			skip_to(SEMICOLON,-1);
+	}
+	{ return null; }
+}
+
+Identifier Identifier() : { Token t; }
+{
+	t=<IDENTIFIER>
+	{ return new Identifier(token.beginLine, token.beginColumn, t.toString()); }
+}
+
+FieldDecl VarDeclarationField() : { Type t; Identifier i; }
+{
+  	try { 
+		t=Type() i=Identifier() ";" { return new FieldDecl(t,i); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(!next.equals(";"))
+			skip_to(SEMICOLON,-1);
+	}
+	{ return null; }
+}
+
+LocalDecl VarDeclarationLocal() : { Type t; Identifier i; }
+{
+  	try { 
+		t=Type() i=Identifier() ";" { return new LocalDecl(t,i); }
+	} catch(ParseException e) {
+		String next = error(e);
+		if(!next.equals(";"))
+			skip_to(SEMICOLON,-1);
+	}
+	{ return null; }
+}
+
+Type Type() : { Token t; }
+{
+  	try {
+		  "int[]" 		{ return syntax.Type.THE_INT_ARRAY_TYPE; }
+  	 	| "int" (
+  	  	      "[" "]" 	{ return syntax.Type.THE_INT_ARRAY_TYPE; }
+			| {} 		{ return syntax.Type.THE_INTEGER_TYPE; }
+		  )
+		| "boolean" 	{ return syntax.Type.THE_BOOLEAN_TYPE; }
+		| "void" 		{ return syntax.Type.THE_VOID_TYPE; }
+		| t=<IDENTIFIER> { return new IdentifierType(t.beginLine,t.beginColumn,t.toString()); }
+	} catch(ParseException e) {
+		String next = error(e);
+		switch(next) {
+			case "<IDENTIFIER>":
+				break;
+			default:
+				skip_to(IDENTIFIER,-1);
+				break;
+		}
+	}
+	{ return null; }
+}
+
+Expression Expression() : { Expression ex1,ex2; }
+{
+	try { 
+		ex1=BasicExpression() ex2=LoopExpression(ex1) { return ex2; }
+	} catch(ParseException e) {
+		String next = error(e);
+	}
+	{ return null; }
+}
+
+Expression BasicExpression() : { Token t; Expression ex; Identifier i; }
+{
+	try {
+	  	  t="new" (
+			  "int" "[" ex=Expression() "]" { return new NewArray(t.beginLine,t.beginColumn,ex); }
+			| i=Identifier() "(" ")"		{ return new NewObject(t.beginLine,t.beginColumn,i); }
+		  )
+		| t="true" 					{ return new True(t.beginLine,t.beginColumn); }
+		| t="false" 				{ return new False(t.beginLine,t.beginColumn); }
+		| t=<IDENTIFIER> 			{ return new IdentifierExp(t.beginLine,t.beginColumn,t.toString()); }
+		| t=<INTLITERAL> 			{ return new IntegerLiteral(t.beginLine,t.beginColumn,Integer.parseInt(t.toString())); }
+		| t="this" 					{ return new This(t.beginLine,t.beginColumn); }
+		| t="!" ex=Expression() 	{ return new Not(t.beginLine,t.beginColumn,ex); }
+		| t="(" ex=Expression() ")" { return ex; }
+	} catch(NumberFormatException e) {}
+	{ return null; }
+}
+
+Expression LoopExpression(Expression ex1) : { Expression ex2; Token t; Identifier i; List<Expression> exl = new ArrayList<Expression>(); }
+{
+	  t="&&" ex2=Expression() 	 { return new And(t.beginLine,t.beginColumn,ex1,ex2); }
+	| t="<" ex2=Expression()  	 { return new LessThan(t.beginLine,t.beginColumn,ex1,ex2); }
+	| t="+" ex2=Expression() 	 { return new Plus(t.beginLine,t.beginColumn,ex1,ex2); }
+	| t="-" ex2=Expression() 	 { return new Minus(t.beginLine,t.beginColumn,ex1,ex2); }
+	| t="*" ex2=Expression() 	 { return new Times(t.beginLine,t.beginColumn,ex1,ex2); }
+	| t="[" ex2=Expression() "]" { return new ArrayLookup(t.beginLine,t.beginColumn,ex1,ex2); }
+	| t="." (
+		  "length" 				 { return new ArrayLength(t.beginLine,t.beginColumn,ex1); }
+		| i=Identifier() "(" (ex2=Expression() { exl.add(ex2); } ("," ex2=Expression() { exl.add(ex2); } )* )? ")" { return new Call(t.beginLine,t.beginColumn,ex1,i,exl); }
+	)
+	| { return ex1; }
+	{ return null; }
+}
+
+/**
+ * Skips to the next token of "skip_to"
+ * If "skip_past" is found, requires 1 additional "skip_to" (useful for brackets)
+ */
+JAVACODE
+void skip_to(int skip_to, int skip_past)
+{
+  	int skip = 1;
+  	Token t;
+	do {
+		t = getNextToken();
+		if(t.kind == skip_to)
+			skip -= 1;
+		if(t.kind == skip_past)
+			skip += 1;
+	} while (t.kind != EOF && skip > 0);
+}
+
+JAVACODE
+String get_token_image(Token t)
+{
+  	String name = MiniJavaConstants.tokenImage[t.kind];
+  	if(name.length() > 1 && name.charAt(0) == '"')
+  		name = name.substring(1, name.length()-1);
+  	return name;
+}
+
+JAVACODE
+String[] get_expected_tokens(ParseException e)
+{
+  	ArrayList<String> list = new ArrayList<String>();
+  	for(int[] i: e.expectedTokenSequences) {
+		for(int k:i) {
+			String name = e.tokenImage[k];
+		  	if(name.length() > 1 && name.charAt(0) == '"')
+		  		name = name.substring(1, name.length()-1);
+			list.add(name);
+		}
+  	}
+  	String[] out = new String[list.size()];
+  	list.toArray(out);
+  	return out;
+}
+
+JAVACODE
+boolean contains(String[] a, String b)
+{
+  	for(String i: a)
+  		if(i.equals(b))
+  			return true;
+  	return false;
+}
+
+JAVACODE
+String error(ParseException e)
+{
+  	addError();
+	String[] expected = get_expected_tokens(e);
+
+	String out = null;
+	String error = null;
+	Token next = null;
+	
+	if(e.currentToken != null && e.currentToken.next != null)
+		next = e.currentToken.next;
+
+	//get error
+	if(next != null && get_token_image(next).equals("<INVALID>")) {
+		error = "Invalid character '" + next + "'";
+		out = "<INVALID>";
+	} else if(expected.length > 0) {
+		out = expected[0];
+		for(int i = 1; i < expected.length; i++) {
+			if(out.equals("<EOF>"))
+				out = expected[i];
+			else
+				i = expected.length;
+		}
+		
+		//get next token
+		switch(out) {
+			case ";":
+				error = "Expected 'class'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "class":
+				error = "Expected 'class'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "<INTLITERAL>":
+				error = "Expected 'integer'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "<IDENTIFIER>":
+				error = "Expected 'identifier'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "{":
+				error = "Expected '{'";
+				if(next != null) error += ", found '" + next + "'";
+			case "}":
+				error = "Expected '}'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "(":
+				error = "Expected '('";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case ")":
+				error = "Expected ')'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "public":
+				error = "Expected 'public'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "static":
+				error = "Expected 'static'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "void":
+				error = "Expected 'void'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "main":
+				error = "Expected 'main'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "String[]":
+				error = "Expected 'String[]'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "extends":
+				error = "Expected 'extends'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "else":
+				error = "Expected 'else'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "return":
+				error = "Expected 'return'";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "true":
+				error = "Expected boolean type";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+			case "false":
+				error = "Expected boolean type";
+				if(next != null) error += ", found '" + next + "'";
+				break;
+		}
+
+		if(contains(expected,"if")) {
+		  	out = "<STATEMENT>";
+			error = "Expected statement";
+			if(next != null) error += ", found '" + next + "'";
+		}
+
+		if(contains(expected,"boolean")) {
+		  	out = "<TYPE>";
+			error = "Expected Type";
+			if(next != null) error += ", found '" + next + "'";
+		}
+
+		if(contains(expected,"new")) {
+		  	out = "<EXPRESSION>";
+			error = "Expected Expression";
+			if(next != null) error += ", found '" + next + "'";
+		}
+
+		if(contains(expected,"length")) {
+		  	out = "<IDENTIFIER>";
+			error = "Expected identifier";
+			if(next != null) error += ", found '" + next + "'";
+		}
+	}
+
+	//print result
+	if(error != null) {
+		if(next != null)
+			Scan.logError(file.getPath() + ":" + next.beginLine + "." + next.beginColumn + ": Error -- " + error);
+		else
+			Scan.logError(file.getPath() + ": Error -- " + error);
+	} else {
+		if(next != null)
+			Scan.logError(file.getPath() + ":" + next.beginLine + "." + next.beginColumn + ": ERROR -- Invalid syntax");
+		else
+			Scan.logError(file.getPath() + ": ERROR -- Invalid syntax");
+	}
+	return out;
+}
